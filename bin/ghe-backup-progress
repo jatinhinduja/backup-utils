@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+#/ Usage: ghe-backup-progress [--once]
+#/ Tracks the completed steps of a backup or restore operation.
+#/
+#/ By default the progress is printed every continuously or until a key is pressed.
+#/ Use the --once option to print the current progress once and exit.
+#/
+#/ Options:
+#/  --once  Don't loop, just print the current progress once.
+#
+set -e
+
+while true; do
+    case "$1" in
+        -o|--once)
+            ONCE=1
+            shift
+            ;;
+        -h|--help)
+            export GHE_SHOW_HELP=true
+            shift
+            ;;
+        -*)
+            echo "Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Bring in the backup configuration
+. "$( dirname "${BASH_SOURCE[0]}" )/../share/github-backup-utils/ghe-backup-config"
+
+uuid=$(get_uuid)
+PROGRESS_DIR="/tmp/backup-utils-progress-${uuid:0:8}"
+
+check_for_progress_file() {
+    if [ ! -f $PROGRESS_DIR/info ]; then
+        echo "No progress file found. Has a backup or restore been started?"
+        exit 1
+    fi
+}
+
+if [ -n "$ONCE" ]; then
+    check_for_progress_file
+    cat $PROGRESS_DIR/info
+else
+    check_for_progress_file
+    clear
+    cat $PROGRESS_DIR/info
+    while true; do
+    if read -r -t 1 -n 1; then
+	clear
+        exit ;
+    else
+	clear
+	cat $PROGRESS_DIR/info
+    fi
+    done
+fi

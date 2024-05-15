@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Emulates a remote GitHub import command. Each of the ghe-import-* utilities
+# that are run on the remote side have corresponding commands in this directory
+# that symlink to this file. The command just gobbles up stdin and writes a
+# simple success message.
+if [ "$1" = "import" ]; then
+    echo "License imported at /data/user/common/enterprise.ghl."
+    echo "License synchronized."
+    exit 0
+elif [ "$1" = "check" ]; then
+    echo "License is valid."
+    exit 0
+else
+    echo "Please provide a command via a flag." >&2
+    exit 1
+fi

@@ -1,0 +1,133 @@
+---
+name: Build and Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version - patch version of the release (e.g. x.y.z)'
+        required: true
+        type: string
+      draft:
+        description: 'Draft - true if the release should be a draft'
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: build-app-token
+        with:
+          app-id: ${{ vars.RELEASE_CONTROLLER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_CONTROLLER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: "backup-utils-private"
+      - name: Checkout backup-utils-private
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.build-app-token.outputs.token }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y moreutils debhelper help2man devscripts gzip
+      - name: Create tag # this is required for the build scripts
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "ghes-releases-team@github.com"
+          git tag -a "v${{ github.event.inputs.version }}" -m "v${{ github.event.inputs.version }}"
+          git push origin "v${{ github.event.inputs.version }}"
+      - name: Package deb
+        run: |
+          ./script/package-deb
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: github-backup-utils_${{ github.event.inputs.version }}_all.deb
+          path: |
+            dist/github-backup-utils_${{ github.event.inputs.version }}_all.deb
+      - name: Package tarball
+        run: |
+          ./script/package-tarball
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: github-backup-utils-v${{ github.event.inputs.version }}.tar.gz
+          path: |
+            dist/github-backup-utils-v${{ github.event.inputs.version }}.tar.gz
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v1
+        id: release-app-token
+        with:
+          app-id: ${{ vars.RELEASE_CONTROLLER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_CONTROLLER_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: "backup-utils,backup-utils-private"
+      - name: Checkout backup-utils
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.release-app-token.outputs.token }}
+          repository: github/backup-utils
+      - name: Checkout backup-utils-private
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.release-app-token.outputs.token }}
+          repository: github/backup-utils-private
+          path: './backup-utils-private'
+      - name: Replace docs directory with backup-utils-private docs
+        run: |
+          rm -rf docs
+          cp -r backup-utils-private/docs docs
+      - name: Replace README.md with backup-utils-private README.md
+        run: |
+          rm README.md
+          cp backup-utils-private/README.md README.md
+      - name: Delete backup-utils-private
+        run: |
+          rm -rf backup-utils-private
+      - name: Create commit on master
+        uses: stefanzweifel/git-auto-commit-action@v4
+        id: commit-on-master
+        with:
+          branch: master
+          commit_message: "${{ github.event.inputs.version }} release"
+          commit_user_name: "release-controller[bot]"
+          commit_user_email: "223695+release-controller[bot]@users.noreply.github.com"
+          commit_options: "--allow-empty"
+          push_options: "--force"
+          skip_dirty_check: true
+      - name: Checkout backup-utils-private for release notes
+        uses: actions/checkout@v4
+        with:
+          token: ${{ steps.release-app-token.outputs.token }}
+          repository: github/backup-utils-private
+      - name: Download deb artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: github-backup-utils_${{ github.event.inputs.version }}_all.deb
+      - name: Download tarball artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: github-backup-utils-v${{ github.event.inputs.version }}.tar.gz
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ steps.release-app-token.outputs.token }}
+          owner: github
+          repo: backup-utils
+          name: |
+            GitHub Enterprise Server Backup Utilities v${{ github.event.inputs.version }}
+          artifacts: |
+            github-backup-utils-v${{ github.event.inputs.version }}.tar.gz,
+            github-backup-utils_${{ github.event.inputs.version }}_all.deb
+          tag: v${{ github.event.inputs.version }}
+          commit: ${{ steps.commit-on-master.outputs.commit_hash }}
+          bodyFile: release-notes/${{ github.event.inputs.version }}.md
+          draft: ${{ github.event.inputs.draft }}
+          allowUpdates: true
+          artifactContentType: "raw"
